@@ -142,12 +142,10 @@ end)
 
 --- @param spec Satellite.Handler
 function M.register(spec)
-  vim.validate {
-    spec = { spec, 'table' },
-    name = { spec.name, 'string' },
-    setup = { spec.setup, 'function', true },
-    update = { spec.update, 'function' },
-  }
+  vim.validate('spec', spec, 'table')
+  vim.validate('name', spec.name, 'string')
+  vim.validate('setup', spec.setup, 'function', true)
+  vim.validate('update', spec.update, 'function')
 
   spec.ns = api.nvim_create_namespace('satellite.Handler.' .. spec.name)
   setmetatable(spec, { __index = Handler })
