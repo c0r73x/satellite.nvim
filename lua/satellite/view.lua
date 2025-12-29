@@ -146,7 +146,7 @@ local function render(bwinid, winid)
 end
 
 local function is_terminal(winid)
-  return fn.getwininfo(winid)[1].terminal ~= 0
+  return assert(fn.getwininfo(winid)[1]).terminal ~= 0
 end
 
 --- @param winid integer
@@ -157,6 +157,10 @@ local function can_show_scrollbar(winid)
 
   -- Skip if the filetype is on the list of exclusions.
   if vim.tbl_contains(user_config.excluded_filetypes, buf_filetype) then
+    return false
+  end
+
+  if vim.wo[winid].winfixbuf then
     return false
   end
 
@@ -249,10 +253,15 @@ function M.refresh_bars()
         -- pcall in case the window cannot be changed (#76)
         local ok, bwinid_or_err = pcall(get_or_create_view, winid)
         if ok then
+          --- @cast bwinid_or_err -string
           render(bwinid_or_err, winid)
           current_bar_wins[#current_bar_wins + 1] = bwinid_or_err
         else
-          vim.notify(debug.traceback('satellite.nvim: unable to get a view'), vim.log.levels.ERROR)
+          --- @cast bwinid_or_err string
+          local msg = debug.traceback('satellite.nvim: unable to get a view: ' .. bwinid_or_err)
+          vim.schedule(function()
+            vim.notify(msg, vim.log.levels.ERROR)
+          end)
         end
       end
     end

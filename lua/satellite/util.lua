@@ -8,7 +8,7 @@ local M = {}
 --- @param ms integer
 --- @return F
 function M.debounce_trailing(f, ms)
-  local timer = assert(vim.loop.new_timer())
+  local timer = assert(vim.uv.new_timer())
   return function(...)
     local argv = { ... }
     timer:start(ms or 100, 0, function()
@@ -35,10 +35,9 @@ end
 --- @param vend? integer
 --- @return integer
 function M.virtual_line_count(winid, start, vend)
-  if not vend then
-    local buf = api.nvim_win_get_buf(winid)
-    vend = api.nvim_buf_line_count(buf) - 1
-  end
+  local buf = api.nvim_win_get_buf(winid)
+  local max_vend = api.nvim_buf_line_count(buf) - 1
+  vend = vend or max_vend
 
   if vend == 0 then
     return 0
@@ -50,17 +49,13 @@ function M.virtual_line_count(winid, start, vend)
   end
 
   if api.nvim_win_text_height then
-    local ok, res = pcall(api.nvim_win_text_height, winid, {
+    local res = api.nvim_win_text_height(winid, {
       start_row = start,
-      end_row = vend,
+      end_row = math.min(vend, max_vend),
     })
-    if ok then
-      if type(res) == 'table' then
-        res = res.all
-      end
-      virtual_line_count_cache[winid][start][vend] = res
-      return res
-    end
+    --- @cast res -string
+    virtual_line_count_cache[winid][start][vend] = res.all
+    return res.all
   end
 
   return api.nvim_win_call(winid, function()
@@ -239,6 +234,7 @@ end
 --- @param winid integer
 --- @return integer, integer
 function M.visible_line_range(winid)
+  --- @diagnostic disable-next-line: missing-return-value
   -- WARN: getwininfo(winid)[1].botline is not properly updated for some
   -- movements (Neovim Issue #13510), so this is implemeneted as a workaround.
   return unpack(api.nvim_win_call(winid, function()
@@ -277,6 +273,29 @@ function M.in_cmdline_win(winid)
   end
   local bufnr = api.nvim_win_get_buf(winid)
   return api.nvim_buf_get_name(bufnr) == '[Command Line]'
+end
+
+--- Predicate function to check whether a bufnr and winid are valid.
+--- @param bufnr integer
+--- @param winid? integer
+--- @return fun(): false?
+function M.winbuf_pred(bufnr, winid)
+  local buftick = vim.b[bufnr].changedtick
+
+  return function()
+    if bufnr then
+      if not api.nvim_buf_is_valid(bufnr) then
+        return false
+      end
+      if vim.b[bufnr].changedtick ~= buftick then
+        return false
+      end
+    end
+
+    if winid and not api.nvim_win_is_valid(winid) then
+      return false
+    end
+  end
 end
 
 return M
