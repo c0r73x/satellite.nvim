@@ -40,9 +40,14 @@ function handler.setup(user_config, update)
 
   setup_hl()
 
+  -- Only the cursor mark moves here; redrawing the whole bar (and every
+  -- other handler) on each cursor move is wasted work. Scrolling caused by
+  -- the move still refreshes everything through WinScrolled.
   api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = group,
-    callback = update,
+    callback = function()
+      require('satellite.view').refresh_handler(handler.name)
+    end,
   })
 end
 

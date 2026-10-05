@@ -275,6 +275,26 @@ function M.refresh_bars()
   end
 end
 
+--- Re-render only one handler's marks on the bars that are already shown.
+--- Cursor movement uses this: it doesn't change the scrollbar itself, and
+--- anything that does (scrolling, text changes, window switches) triggers a
+--- full refresh_bars() through its own autocmds.
+--- @param name string
+function M.refresh_handler(name)
+  if not enabled then
+    return
+  end
+
+  local Handlers = require('satellite.handlers')
+  for _, winid in ipairs(get_target_windows()) do
+    local bwinid = winids[winid]
+    if bwinid and api.nvim_win_is_valid(bwinid) and api.nvim_win_is_valid(winid) then
+      util.invalidate_virtual_line_count_cache(winid)
+      Handlers.render_handler(name, bwinid, winid)
+    end
+  end
+end
+
 function M.remove_bars()
   for winid, _ in pairs(winids) do
     close(winid)

@@ -166,6 +166,23 @@ function M.render(bwinid, winid)
   end
 end
 
+--- Re-render a single handler's marks on an existing bar.
+--- @param name string
+--- @param bwinid integer
+--- @param winid integer
+function M.render_handler(name, bwinid, winid)
+  M.init()
+
+  for _, handler in ipairs(M.handlers) do
+    if handler.name == name then
+      async.run(function()
+        handler:render(winid, bwinid)
+      end)
+      return
+    end
+  end
+end
+
 function M.init()
   if did_init then
     return
