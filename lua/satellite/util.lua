@@ -23,8 +23,76 @@ end
 --- @type table<integer,table<integer,table<integer,integer>>>
 local virtual_line_count_cache = vim.defaulttable()
 
+--- Per window, the sorted `vend` values cached for `start == 1`, so a count
+--- for a later row can extend the nearest cached prefix instead of walking
+--- every line from the top again.
+--- @type table<integer,integer[]>
+local prefix_rows = {}
+
+--- Per window, the state the cached counts were computed for.
+--- @type table<integer,string>
+local cache_stamp = {}
+
+--- @param winid integer
 function M.invalidate_virtual_line_count_cache(winid)
+  if winid == 0 then
+    winid = api.nvim_get_current_win()
+  end
   virtual_line_count_cache[winid] = nil
+  prefix_rows[winid] = nil
+  cache_stamp[winid] = nil
+end
+
+--- Drops the cached counts for a window only if line heights may have
+--- changed since they were computed: the buffer was edited, the window was
+--- resized, or the total height changed (folds opened/closed, virtual or
+--- concealed lines). Cursor movement and scrolling keep the cache.
+--- @param winid integer
+function M.refresh_virtual_line_count_cache(winid)
+  if not api.nvim_win_text_height then
+    M.invalidate_virtual_line_count_cache(winid)
+    return
+  end
+
+  local bufnr = api.nvim_win_get_buf(winid)
+  local stamp = table.concat({
+    bufnr,
+    vim.b[bufnr].changedtick,
+    api.nvim_win_get_width(winid),
+    api.nvim_win_text_height(winid, {}).all,
+  }, ':')
+
+  if cache_stamp[winid] ~= stamp then
+    M.invalidate_virtual_line_count_cache(winid)
+    cache_stamp[winid] = stamp
+  end
+end
+
+--- Index of the largest cached prefix row below `vend`, if any.
+--- @param rows integer[]
+--- @param vend integer
+--- @return integer?
+local function prefix_before(rows, vend)
+  local lo, hi, found = 1, #rows, nil
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    if rows[mid] < vend then
+      found = mid
+      lo = mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  return found
+end
+
+--- @param rows integer[]
+--- @param vend integer
+local function insert_prefix(rows, vend)
+  local i = (prefix_before(rows, vend) or 0) + 1
+  if rows[i] ~= vend then
+    table.insert(rows, i, vend)
+  end
 end
 
 --- Returns the count of virtual lines between the specified start and end lines
@@ -49,13 +117,36 @@ function M.virtual_line_count(winid, start, vend)
   end
 
   if api.nvim_win_text_height then
+    -- Counts are additive per line, so continue from the nearest cached
+    -- prefix: count(1, vend) = count(1, p) + count(p + 1, vend). Not when a
+    -- closed fold spans p and p + 1, as it counts as one line in total.
+    local from, base = start, 0
+    local rows = start == 1 and prefix_rows[winid] or nil
+    local i = rows and prefix_before(rows, vend)
+    if i then
+      local p = rows[i]
+      local spans_fold = vim.wo[winid].foldenable
+        and api.nvim_win_call(winid, function()
+          local closed = fn.foldclosed(p + 2)
+          return closed ~= -1 and closed <= p + 1
+        end)
+      if not spans_fold then
+        from, base = p + 1, virtual_line_count_cache[winid][1][p]
+      end
+    end
+
     local res = api.nvim_win_text_height(winid, {
-      start_row = start,
+      start_row = from,
       end_row = math.min(vend, max_vend),
     })
     --- @cast res -string
-    virtual_line_count_cache[winid][start][vend] = res.all
-    return res.all
+    local count = base + res.all
+    virtual_line_count_cache[winid][start][vend] = count
+    if start == 1 then
+      prefix_rows[winid] = prefix_rows[winid] or {}
+      insert_prefix(prefix_rows[winid], vend)
+    end
+    return count
   end
 
   return api.nvim_win_call(winid, function()

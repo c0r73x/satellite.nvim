@@ -155,7 +155,7 @@ end
 --- @param bwinid integer
 --- @param winid integer
 local function render(bwinid, winid)
-  util.invalidate_virtual_line_count_cache(winid)
+  util.refresh_virtual_line_count_cache(winid)
 
   render_scrollbar(winid, bwinid)
 
@@ -309,7 +309,7 @@ function M.refresh_handler(name)
   for _, winid in ipairs(get_target_windows()) do
     local bwinid = get_bar_winid(winid)
     if bwinid and api.nvim_win_is_valid(winid) then
-      util.invalidate_virtual_line_count_cache(winid)
+      util.refresh_virtual_line_count_cache(winid)
       Handlers.render_handler(name, bwinid, winid)
     end
   end
