@@ -30,7 +30,7 @@ local virtual_line_count_cache = vim.defaulttable()
 local prefix_rows = {}
 
 --- Per window, the state the cached counts were computed for.
---- @type table<integer,string>
+--- @type table<integer,{base:string,total:integer}>
 local cache_stamp = {}
 
 --- @param winid integer
@@ -45,26 +45,34 @@ end
 
 --- Drops the cached counts for a window only if line heights may have
 --- changed since they were computed: the buffer was edited, the window was
---- resized, or the total height changed (folds opened/closed, virtual or
---- concealed lines). Cursor movement and scrolling keep the cache.
+--- resized, or (with `full`) the total height changed (folds opened/closed,
+--- virtual or concealed lines). Measuring the total height calls back into
+--- Lua for every line of the buffer, so cursor movement, which can't change
+--- heights, passes `full = false`; fold keys invalidate the cache directly.
 --- @param winid integer
-function M.refresh_virtual_line_count_cache(winid)
+--- @param full? boolean
+function M.refresh_virtual_line_count_cache(winid, full)
   if not api.nvim_win_text_height then
     M.invalidate_virtual_line_count_cache(winid)
     return
   end
 
   local bufnr = api.nvim_win_get_buf(winid)
-  local stamp = table.concat({
+  local base = table.concat({
     bufnr,
     vim.b[bufnr].changedtick,
     api.nvim_win_get_width(winid),
-    api.nvim_win_text_height(winid, {}).all,
   }, ':')
 
-  if cache_stamp[winid] ~= stamp then
+  local stamp = cache_stamp[winid]
+  if not full and stamp and stamp.base == base then
+    return
+  end
+
+  local total = api.nvim_win_text_height(winid, {}).all
+  if not stamp or stamp.base ~= base or stamp.total ~= total then
     M.invalidate_virtual_line_count_cache(winid)
-    cache_stamp[winid] = stamp
+    cache_stamp[winid] = { base = base, total = total }
   end
 end
 
