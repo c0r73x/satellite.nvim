@@ -9,9 +9,28 @@ local ns = api.nvim_create_namespace('satellite')
 local M = {}
 
 local enabled = false
+local refresh_scheduled = false
 
 --- @type table<integer,integer?>
 local winids = {}
+
+--- Returns the scrollbar window for `winid` if it still exists.
+--- Clears stale cache entries when the scrollbar window was already closed.
+--- @param winid integer
+--- @return integer?
+local function get_bar_winid(winid)
+  local bar_winid = winids[winid]
+  if not bar_winid then
+    return
+  end
+
+  if not api.nvim_win_is_valid(bar_winid) then
+    winids[winid] = nil
+    return
+  end
+
+  return bar_winid
+end
 
 --- @param win integer
 --- @param opt string
@@ -103,7 +122,7 @@ local function get_or_create_view(winid)
     col = api.nvim_win_get_width(winid) - 1,
   }
 
-  local bar_winid = winids[winid]
+  local bar_winid = get_bar_winid(winid)
   if bar_winid then
     local bar_wininfo = vim.fn.getwininfo(bar_winid)[1]
     -- wininfo can be nil when pressing <C-w>o in help buffers
@@ -198,7 +217,7 @@ end
 --- @param winid integer
 --- @return {height:integer, row: integer, col: integer, width:integer}?
 function M.get_props(winid)
-  local bar_winid = winids[winid]
+  local bar_winid = get_bar_winid(winid)
   if not bar_winid then
     return
   end
@@ -230,17 +249,18 @@ end
 --- @param winid integer
 local function close(winid)
   util.invalidate_virtual_line_count_cache(winid)
-  local bar_winid = winids[winid]
+  local bar_winid = get_bar_winid(winid)
   if not bar_winid then
-    return
-  end
-  if not api.nvim_win_is_valid(bar_winid) then
     return
   end
   if util.in_cmdline_win(winid) then
     return
   end
-  util.noautocmd(api.nvim_win_close)(bar_winid, true)
+  vim.schedule(function()
+    if api.nvim_win_is_valid(bar_winid) then
+      util.noautocmd(api.nvim_win_close)(bar_winid, true)
+    end
+  end)
   winids[winid] = nil
 end
 
@@ -287,12 +307,24 @@ function M.refresh_handler(name)
 
   local Handlers = require('satellite.handlers')
   for _, winid in ipairs(get_target_windows()) do
-    local bwinid = winids[winid]
-    if bwinid and api.nvim_win_is_valid(bwinid) and api.nvim_win_is_valid(winid) then
+    local bwinid = get_bar_winid(winid)
+    if bwinid and api.nvim_win_is_valid(winid) then
       util.invalidate_virtual_line_count_cache(winid)
       Handlers.render_handler(name, bwinid, winid)
     end
   end
+end
+
+function M.schedule_refresh()
+  if refresh_scheduled then
+    return
+  end
+
+  refresh_scheduled = true
+  vim.schedule(function()
+    refresh_scheduled = false
+    M.refresh_bars()
+  end)
 end
 
 function M.remove_bars()
